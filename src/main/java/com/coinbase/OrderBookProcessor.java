@@ -19,6 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -34,19 +35,23 @@ public class OrderBookProcessor {
         processSnapshot(snapshotJson);
     }
 
-    private void processSnapshot(String snapshotJson) {
+    public synchronized void processSnapshot(String snapshotJson) {
         try {
             JsonNode root = MAPPER.readTree(snapshotJson);
             JsonNode events = root.path("events");
 
-            if (!events.isArray() || events.isEmpty()) return;
+            if (!events.isArray() || events.isEmpty()) {
+                return;
+            }
 
             JsonNode firstEvent = events.get(0);
             JsonNode updates = firstEvent.path("updates");
-            if (!updates.isArray()) return;
+            if (!updates.isArray()) {
+                return;
+            }
 
             bids.clear();
-            asks.clear(); // Reset order book on snapshot
+            asks.clear();
 
             for (JsonNode levelNode : updates) {
                 Level lvl = parseLevel(levelNode);
@@ -64,19 +69,24 @@ public class OrderBookProcessor {
         }
     }
 
-    public void applyUpdate(String updateJson) {
+    public synchronized void applyUpdate(String updateJson) {
         try {
             JsonNode root = MAPPER.readTree(updateJson);
             String channel = root.path("channel").asText();
-            if (!"l2_data".equals(channel)) return;
+            if (!"l2_data".equals(channel)) {
+                return;
+            }
 
             JsonNode events = root.path("events");
-            if (!events.isArray()) return;
+            if (!events.isArray()) {
+                return;
+            }
 
             for (JsonNode event : events) {
                 JsonNode updates = event.path("updates");
-                if (!updates.isArray()) continue;
-
+                if (!updates.isArray()) {
+                    continue;
+                }
                 for (JsonNode upd : updates) {
                     Level lvl = parseLevel(upd);
                     applySingleLevel(lvl);
@@ -92,7 +102,9 @@ public class OrderBookProcessor {
 
     private void applySingleLevel(Level lvl) {
         List<Level> list = "bid".equalsIgnoreCase(lvl.side) ? bids : asks;
+
         list.removeIf(existing -> existing.px.compareTo(lvl.px) == 0);
+
         if (lvl.qty.compareTo(BigDecimal.ZERO) > 0) {
             list.add(lvl);
         }
@@ -110,27 +122,29 @@ public class OrderBookProcessor {
 
     private Level parseLevel(JsonNode node) {
         return new Level(
-            new BigDecimal(node.path("px").asText()),
-            new BigDecimal(node.path("qty").asText()),
-            node.path("side").asText()
+                new BigDecimal(node.path("px").asText()),
+                new BigDecimal(node.path("qty").asText()),
+                node.path("side").asText()
         );
     }
 
-    public List<Level> getTopBids(int n) {
-        return bids.subList(0, Math.min(n, bids.size()));
+    public synchronized List<Level> getTopBids(int n) {
+        int size = Math.min(n, bids.size());
+        return new ArrayList<>(bids.subList(0, size));
     }
 
-    public List<Level> getTopAsks(int n) {
-        return asks.subList(0, Math.min(n, asks.size()));
+    public synchronized List<Level> getTopAsks(int n) {
+        int size = Math.min(n, asks.size());
+        return new ArrayList<>(asks.subList(0, size));
     }
 
-    public BigDecimal getMidPrice() {
+    public synchronized BigDecimal getMidPrice() {
         if (bids.isEmpty() || asks.isEmpty()) {
             return null;
         }
         BigDecimal highestBid = bids.get(0).px;
-        BigDecimal lowestAsk = asks.get(0).px;
-        return highestBid.add(lowestAsk).divide(BigDecimal.valueOf(2), BigDecimal.ROUND_HALF_UP);
+        BigDecimal lowestAsk  = asks.get(0).px;
+        return highestBid.add(lowestAsk).divide(BigDecimal.valueOf(2), RoundingMode.HALF_UP);
     }
 
     public static class Level {

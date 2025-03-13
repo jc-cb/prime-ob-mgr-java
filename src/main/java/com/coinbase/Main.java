@@ -16,13 +16,29 @@ package com.coinbase;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.io.IOException;
+import java.util.UUID;
+
+import com.coinbase.prime.orders.OrdersService;
+import com.coinbase.prime.model.orders.CreateOrderRequest;
+import com.coinbase.prime.model.orders.CreateOrderResponse;
+import com.coinbase.prime.client.CoinbasePrimeClient;
+import com.coinbase.prime.factory.PrimeServiceFactory;
+import com.coinbase.prime.credentials.CoinbasePrimeCredentials;
+import com.coinbase.prime.model.enums.OrderSide;
+import com.coinbase.prime.model.enums.OrderType;
 
 public class Main {
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) throws InterruptedException, IOException {
 
+        String credsStringBlob = System.getenv("COINBASE_PRIME_CREDENTIALS");
         CoinbasePrimeWebsocketClient wsClient = new CoinbasePrimeWebsocketClient();
 
         new Thread(wsClient::start).start();
+
+        CoinbasePrimeCredentials credentials = new CoinbasePrimeCredentials(credsStringBlob);
+        CoinbasePrimeClient client = new CoinbasePrimeClient(credentials);
+        OrdersService ordersService = PrimeServiceFactory.createOrdersService(client);
 
         while (true) {
             OrderBookProcessor processor = wsClient.getProcessor();
@@ -35,14 +51,46 @@ public class Main {
                 System.out.println("Mid Price: " + (mid != null ? mid : "N/A"));
 
                 List<OrderBookProcessor.Level> topBids = processor.getTopBids(10);
+                List<OrderBookProcessor.Level> topAsks = processor.getTopAsks(10);
+
                 System.out.println("Top Bids:");
                 for (OrderBookProcessor.Level lvl : topBids) {
                     System.out.println("  " + lvl);
                 }
 
-                List<OrderBookProcessor.Level> topAsks = processor.getTopAsks(10);
                 System.out.println("Top Asks:");
                 for (OrderBookProcessor.Level lvl : topAsks) {
+                    System.out.println("  " + lvl);
+                }
+
+                CreateOrderResponse orderResponse = ordersService.createOrder(
+                        new CreateOrderRequest.Builder()
+                                .portfolioId("314dbd76-4459-41cd-ba9a-dccdd86b44e2")
+                                .productId("ETH-USD")
+                                .side(OrderSide.BUY)
+                                .type(OrderType.LIMIT)
+                                .baseQuantity("0.001")
+                                .limitPrice("1000.0")
+                                .clientOrderId(UUID.randomUUID().toString())
+                                .build()
+                );
+
+                String orderId = orderResponse.getOrderId();
+                System.out.println("Order ID: " + orderId);
+
+
+                BigDecimal midSnapshot = processor.getMidPrice();
+                List<OrderBookProcessor.Level> safeTopBids = processor.getTopBids(10);
+                List<OrderBookProcessor.Level> safeTopAsks = processor.getTopAsks(10);
+
+                System.out.println("\nCaptured Book for Order " + orderId);
+                System.out.println("Mid Price: " + midSnapshot);
+                System.out.println("Top Bids:");
+                for (OrderBookProcessor.Level lvl : safeTopBids) {
+                    System.out.println("  " + lvl);
+                }
+                System.out.println("Top Asks:");
+                for (OrderBookProcessor.Level lvl : safeTopAsks) {
                     System.out.println("  " + lvl);
                 }
             }
