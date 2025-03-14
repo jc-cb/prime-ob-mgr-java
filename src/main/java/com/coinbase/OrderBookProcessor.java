@@ -40,18 +40,14 @@ public class OrderBookProcessor {
             JsonNode root = MAPPER.readTree(snapshotJson);
             JsonNode events = root.path("events");
 
-            if (!events.isArray() || events.isEmpty()) {
-                return;
-            }
+            if (!events.isArray() || events.isEmpty()) return;
 
             JsonNode firstEvent = events.get(0);
             JsonNode updates = firstEvent.path("updates");
-            if (!updates.isArray()) {
-                return;
-            }
+            if (!updates.isArray()) return;
 
             bids.clear();
-            asks.clear();
+            asks.clear(); // Reset on snapshot
 
             for (JsonNode levelNode : updates) {
                 Level lvl = parseLevel(levelNode);
@@ -63,7 +59,6 @@ public class OrderBookProcessor {
             }
 
             sortAll();
-
         } catch (JsonProcessingException e) {
             e.printStackTrace();
         }
@@ -73,20 +68,15 @@ public class OrderBookProcessor {
         try {
             JsonNode root = MAPPER.readTree(updateJson);
             String channel = root.path("channel").asText();
-            if (!"l2_data".equals(channel)) {
-                return;
-            }
+            if (!"l2_data".equals(channel)) return;
 
             JsonNode events = root.path("events");
-            if (!events.isArray()) {
-                return;
-            }
+            if (!events.isArray()) return;
 
             for (JsonNode event : events) {
                 JsonNode updates = event.path("updates");
-                if (!updates.isArray()) {
-                    continue;
-                }
+                if (!updates.isArray()) continue;
+
                 for (JsonNode upd : updates) {
                     Level lvl = parseLevel(upd);
                     applySingleLevel(lvl);
@@ -128,6 +118,8 @@ public class OrderBookProcessor {
         );
     }
 
+    // -------------------- PUBLIC READ METHODS -------------------- //
+
     public synchronized List<Level> getTopBids(int n) {
         int size = Math.min(n, bids.size());
         return new ArrayList<>(bids.subList(0, size));
@@ -138,14 +130,32 @@ public class OrderBookProcessor {
         return new ArrayList<>(asks.subList(0, size));
     }
 
+    public synchronized BigDecimal getTotalAsksQty() {
+        BigDecimal total = BigDecimal.ZERO;
+        for (Level ask : asks) {
+            total = total.add(ask.qty);
+        }
+        return total;
+    }
+
+    public synchronized BigDecimal getTotalBidsQty() {
+        BigDecimal total = BigDecimal.ZERO;
+        for (Level bid : bids) {
+            total = total.add(bid.qty);
+        }
+        return total;
+    }
+
+    /** e.g. mid = (bestBid + bestAsk)/2 */
     public synchronized BigDecimal getMidPrice() {
         if (bids.isEmpty() || asks.isEmpty()) {
             return null;
         }
         BigDecimal highestBid = bids.get(0).px;
-        BigDecimal lowestAsk  = asks.get(0).px;
+        BigDecimal lowestAsk = asks.get(0).px;
         return highestBid.add(lowestAsk).divide(BigDecimal.valueOf(2), RoundingMode.HALF_UP);
     }
+
 
     public static class Level {
         public BigDecimal px;
