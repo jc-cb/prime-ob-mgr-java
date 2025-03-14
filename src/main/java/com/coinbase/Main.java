@@ -28,44 +28,33 @@ import com.coinbase.prime.credentials.CoinbasePrimeCredentials;
 import com.coinbase.prime.model.enums.OrderSide;
 import com.coinbase.prime.model.enums.OrderType;
 
-/**
- * Main entry point for capturing order book data into a CSV whenever we place an order.
- */
 public class Main {
 
     private static final String CSV_FILE_PATH = "order_book_capture.csv";
 
     public static void main(String[] args) throws InterruptedException, IOException {
 
-        // Load creds from environment
         String credsStringBlob = System.getenv("COINBASE_PRIME_CREDENTIALS");
 
-        // Start the WebSocket in a background thread to receive L2 updates
         CoinbasePrimeWebsocketClient wsClient = new CoinbasePrimeWebsocketClient();
         new Thread(wsClient::start).start();
 
-        // Create REST client
         CoinbasePrimeCredentials credentials = new CoinbasePrimeCredentials(credsStringBlob);
         CoinbasePrimeClient client = new CoinbasePrimeClient(credentials);
         OrdersService ordersService = PrimeServiceFactory.createOrdersService(client);
 
-        // Ensure CSV file has a header row
         OrderBookCsvExporter.ensureCsvHasHeaderIfNeeded(CSV_FILE_PATH);
 
-        // Main loop
         while (true) {
-            // Access the real-time order book
             OrderBookProcessor processor = wsClient.getProcessor();
 
             if (processor == null) {
                 System.out.println("\nNo snapshot has been received yet... waiting.");
             } else {
-                // Print current mid price for debugging
                 BigDecimal mid = processor.getMidPrice();
                 System.out.println("\n----- Current Book -----");
                 System.out.println("Mid Price: " + (mid != null ? mid : "N/A"));
 
-                // Top 10 Bids & Asks (copy for concurrency safety)
                 List<OrderBookProcessor.Level> topBids = processor.getTopBids(10);
                 List<OrderBookProcessor.Level> topAsks = processor.getTopAsks(10);
 
@@ -79,7 +68,6 @@ public class Main {
                     System.out.println("  " + lvl);
                 }
 
-                // Place an order via REST
                 CreateOrderResponse orderResponse = ordersService.createOrder(
                     new CreateOrderRequest.Builder()
                             .portfolioId("314dbd76-4459-41cd-ba9a-dccdd86b44e2")
@@ -95,7 +83,6 @@ public class Main {
                 String orderId = orderResponse.getOrderId();
                 System.out.println("Order ID: " + orderId);
 
-                // Immediately capture the top-of-book data again (for concurrency safety)
                 BigDecimal midSnapshot = processor.getMidPrice();
                 List<OrderBookProcessor.Level> safeTopBids = processor.getTopBids(10);
                 List<OrderBookProcessor.Level> safeTopAsks = processor.getTopAsks(10);
@@ -103,7 +90,6 @@ public class Main {
                 System.out.println("\nCaptured Book for Order " + orderId);
                 System.out.println("Mid Price: " + midSnapshot);
 
-                // Print them again for debugging
                 System.out.println("Top Bids:");
                 for (OrderBookProcessor.Level lvl : safeTopBids) {
                     System.out.println("  " + lvl);
@@ -113,7 +99,6 @@ public class Main {
                     System.out.println("  " + lvl);
                 }
 
-                // Finally, write to CSV
                 OrderBookCsvExporter.captureOrderBookToCsv(
                         CSV_FILE_PATH,
                         orderId,
